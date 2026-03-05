@@ -60,16 +60,25 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
+  const ownerRoleId = "1459070165164757225";
+  
+  if (!interaction.member.roles.cache.has(ownerRoleId)) {
+    return await interaction.reply({ 
+      content: '❌ Tento příkaz může používat pouze uživatel s rolí **Owner**.', 
+      ephemeral: true
+    });
+  }
+
   if (interaction.commandName === 'testbot') {
     await interaction.reply('✅ Bot je online, reaguje a běží na Renderu!');
   }
 
   if (interaction.commandName === 'testur') {
-    await interaction.reply(`🌐 **Uptime Check:**\nPoslední požadavek na webový server přišel v: \`${lastPingTime}\`.\n*(Pokud je čas aktuální, UptimeRobot i Self-ping fungují správně.)*`);
+    await interaction.reply(`🌐 **Uptime Check:**\nPoslední požadavek na webový server přišel v: \`${lastPingTime}\`.`);
   }
 
   if (interaction.commandName === 'testdb') {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
     try {
       const testRef = db.collection('status_checks').doc('last_check');
       await testRef.set({
