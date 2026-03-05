@@ -3,6 +3,8 @@ const express = require('express');
 const admin = require('firebase-admin');
 const axios = require('axios');
 
+let lastPingTime = "Zatím žádný ping nepřišel";
+
 const firebaseKey = JSON.parse(process.env.FIREBASE_KEY);
 admin.initializeApp({
   credential: admin.credential.cert(firebaseKey)
@@ -10,7 +12,11 @@ admin.initializeApp({
 const db = admin.firestore();
 
 const app = express();
-app.get('/', (req, res) => res.send('Bot i databáze běží!'));
+app.get('/', (req, res) => {
+  lastPingTime = new Date().toLocaleString('cs-CZ', { timeZone: 'Europe/Prague' });
+  res.send('Bot i databáze běží! Poslední ping: ' + lastPingTime);
+});
+
 app.listen(process.env.PORT || 3000, () => {
   console.log('Web server běží na portu ' + (process.env.PORT || 3000));
 });
@@ -26,6 +32,7 @@ const client = new Client({
 const commands = [
   new SlashCommandBuilder().setName('testbot').setDescription('Zkontroluje, zda bot běží'),
   new SlashCommandBuilder().setName('testdb').setDescription('Zkontroluje připojení k databázi'),
+  new SlashCommandBuilder().setName('testur').setDescription('Zkontroluje poslední aktivitu UptimeRobota'),
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -40,9 +47,12 @@ client.once('ready', async () => {
   }
 
   setInterval(() => {
-    const url = `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`; 
+    const url = process.env.RENDER_EXTERNAL_HOSTNAME 
+      ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` 
+      : "https://icg-discord-bot.onrender.com";
+
     axios.get(url)
-      .then(() => console.log('Self-ping úspěšný - bot zůstává vzhůru.'))
+      .then(() => console.log('Self-ping úspěšný.'))
       .catch(err => console.error('Self-ping selhal:', err.message));
   }, 1000 * 60 * 5);
 });
@@ -52,6 +62,10 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.commandName === 'testbot') {
     await interaction.reply('✅ Bot je online, reaguje a běží na Renderu!');
+  }
+
+  if (interaction.commandName === 'testur') {
+    await interaction.reply(`🌐 **Uptime Check:**\nPoslední požadavek na webový server přišel v: \`${lastPingTime}\`.\n*(Pokud je čas aktuální, UptimeRobot i Self-ping fungují správně.)*`);
   }
 
   if (interaction.commandName === 'testdb') {
@@ -71,4 +85,3 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
-
