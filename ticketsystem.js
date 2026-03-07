@@ -102,11 +102,8 @@ module.exports = async (client, db) => {
         }
 
         if (i.isStringSelectMenu() && i.customId === 'ticket_select') {
-            // TATO ČÁST OPRAVUJE TO ZAŠKRTNUTÍ (Reset menu)
-            await i.update({ components: i.message.components });
-
             if (i.guild.channels.cache.find(c => c.name === `ticket-${i.user.username.toLowerCase()}`)) {
-                return i.followUp({ content: '❌ Už máš jeden aktivní ticket.', ephemeral: true });
+                return i.reply({ content: '❌ Už máš jeden aktivní ticket.', ephemeral: true });
             }
 
             const type = i.values[0];
@@ -114,7 +111,10 @@ module.exports = async (client, db) => {
             questionsMap[type].forEach((obj, idx) => {
                 modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(`q${idx}`).setLabel(obj.q.substring(0, 45)).setStyle(obj.len === 1000 ? TextInputStyle.Paragraph : TextInputStyle.Short).setMaxLength(obj.len).setRequired(true)));
             });
+
             await i.showModal(modal);
+            
+            await i.message.edit({ components: i.message.components });
         }
 
         if (i.isModalSubmit()) {
