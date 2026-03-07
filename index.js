@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const admin = require('firebase-admin');
 const express = require('express');
 
@@ -16,7 +16,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers
-    ]
+    ],
+    partials: [Partials.Channel]
 });
 
 require('./logs.js')(client, db);
