@@ -102,7 +102,13 @@ module.exports = async (client, db) => {
         }
 
         if (i.isStringSelectMenu() && i.customId === 'ticket_select') {
-            if (i.guild.channels.cache.find(c => c.name === `ticket-${i.user.username.toLowerCase()}`)) return i.reply({ content: '❌ Už máš jeden aktivní ticket.', ephemeral: true });
+            // TATO ČÁST OPRAVUJE TO ZAŠKRTNUTÍ (Reset menu)
+            await i.update({ components: i.message.components });
+
+            if (i.guild.channels.cache.find(c => c.name === `ticket-${i.user.username.toLowerCase()}`)) {
+                return i.followUp({ content: '❌ Už máš jeden aktivní ticket.', ephemeral: true });
+            }
+
             const type = i.values[0];
             const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(categoryNames[type]);
             questionsMap[type].forEach((obj, idx) => {
