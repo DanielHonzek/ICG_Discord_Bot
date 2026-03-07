@@ -1,10 +1,11 @@
 const { 
     EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, 
     ModalBuilder, TextInputBuilder, TextInputStyle, 
-    ChannelType, PermissionFlagsBits, ButtonBuilder, ButtonStyle 
+    ChannelType, PermissionFlagsBits, ButtonBuilder, ButtonStyle,
+    SlashCommandBuilder, Routes, REST
 } = require('discord.js');
 
-module.exports = (client, db) => {
+module.exports = async (client, db) => {
     const CHANNEL_ID = '1459071877275193457';
     const ARCHIVE_CATEGORY_ID = '1479807961215008984';
     const STAFF_PING_ROLE = '1459070165164757225';
@@ -13,6 +14,26 @@ module.exports = (client, db) => {
         '1459070165164757225', '1466864975133016280', 
         '1467512663306404087', '1459070165164757225'
     ];
+
+    const commands = [
+        new SlashCommandBuilder()
+            .setName('uzavrit')
+            .setDescription('Požádá o uzavření ticketu'),
+        new SlashCommandBuilder()
+            .setName('prevzit')
+            .setDescription('Převezme ticket (pouze pro Staff)')
+            .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    ];
+
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+
+    try {
+        console.log('🔄 Registruji slash příkazy...');
+        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+        console.log('✅ Příkazy úspěšně registrovány!');
+    } catch (error) {
+        console.error('❌ Chyba při registraci příkazů:', error);
+    }
 
     const categoryNames = {
         'gen_support': 'Všeobecná podpora',
@@ -44,6 +65,13 @@ module.exports = (client, db) => {
         ]
     };
 
+    const getTicketButtons = (disabledClose, disabledClaim, claimLabel) => {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('close_ticket_request').setLabel('Uzavřít').setStyle(ButtonStyle.Danger).setDisabled(disabledClose),
+            new ButtonBuilder().setCustomId('claim_ticket').setLabel(claimLabel).setStyle(claimLabel === 'Převzít' ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabledClaim)
+        );
+    };
+
     client.once('ready', async () => {
         const channel = client.channels.cache.get(CHANNEL_ID);
         if (!channel) return;
@@ -57,11 +85,52 @@ module.exports = (client, db) => {
     });
 
     client.on('interactionCreate', async (interaction) => {
+        const initiateClose = async (inter) => {
+            if (!inter.channel.name.startsWith('ticket-')) return inter.reply({ content: 'Tento příkaz lze použít pouze v ticketu!', ephemeral: true });
+            
+            const messages = await inter.channel.messages.fetch({ limit: 50 });
+            const mainMsg = messages.find(m => m.author.id === client.user.id && m.components.length > 0 && m.components[0].components[0].customId === 'close_ticket_request');
+            
+            const isClaimed = mainMsg ? mainMsg.components[0].components[1].disabled : false;
+            const currentLabel = mainMsg ? mainMsg.components[0].components[1].label : 'Převzít';
+
+            if (mainMsg) await mainMsg.edit({ components: [getTicketButtons(true, isClaimed, currentLabel)] });
+
+            const confirmRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('confirm_close').setLabel('Ano, uzavřít').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId('cancel_close').setLabel('Zrušit').setStyle(ButtonStyle.Secondary)
+            );
+            const reply = await inter.reply({ content: '⚠️ Opravdu si přejete tento ticket uzavřít?', components: [confirmRow], fetchReply: true });
+
+            setTimeout(async () => {
+                const check = await inter.channel.messages.fetch(reply.id).catch(() => null);
+                if (check) {
+                    await check.delete().catch(() => {});
+                    if (mainMsg) await mainMsg.edit({ components: [getTicketButtons(false, isClaimed, currentLabel)] });
+                }
+            }, 180000);
+        };
+
+        if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'prevzit') {
+                if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) return interaction.reply({ content: 'Tuto akci může provést pouze Staff!', ephemeral: true });
+                if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: 'Tento příkaz lze použít pouze v otevřeném ticketu!', ephemeral: true });
+
+                const messages = await interaction.channel.messages.fetch({ limit: 50 });
+                const mainMsg = messages.find(m => m.author.id === client.user.id && m.components.length > 0);
+                
+                if (mainMsg) await mainMsg.edit({ components: [getTicketButtons(false, true, 'Převzato')] });
+                await interaction.reply({ content: `Ticket převzal/a **${interaction.user.username}**.` });
+            }
+
+            if (interaction.commandName === 'uzavrit') {
+                await initiateClose(interaction);
+            }
+        }
+
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
             const existingTicket = interaction.guild.channels.cache.find(c => c.name === `ticket-${interaction.user.username.toLowerCase()}`);
-            if (existingTicket) {
-                return interaction.reply({ content: '❌ Už máš jeden aktivní ticket a více jich vytvořit nemůžeš.', ephemeral: true });
-            }
+            if (existingTicket) return interaction.reply({ content: '❌ Už máš jeden aktivní ticket.', ephemeral: true });
 
             const type = interaction.values[0];
             const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(categoryNames[type]);
@@ -76,9 +145,8 @@ module.exports = (client, db) => {
         if (interaction.isModalSubmit()) {
             await interaction.deferReply({ ephemeral: true });
             const typeValue = interaction.customId.replace('modal_', '');
-            
             const ticketChannel = await interaction.guild.channels.create({
-                name: `ticket-${interaction.user.username}`,
+                name: `ticket-${interaction.user.username.toLowerCase()}`,
                 type: ChannelType.GuildText,
                 permissionOverwrites: [
                     { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -86,77 +154,45 @@ module.exports = (client, db) => {
                     ...AUTHORIZED_ROLES.map(roleId => ({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }))
                 ]
             });
-
-            const welcomeEmbed = new EmbedBuilder().setDescription(`Úspěšně jste vytvořil ticket: **${categoryNames[typeValue]}**\nNaš Discord Staff Team se vám bude věnovat hned jak to bude možné. Děkujeme za vaší trpělivost.`).setColor('#00FF00');
+            const welcomeEmbed = new EmbedBuilder().setDescription(`Úspěšně jste vytvořil ticket: **${categoryNames[typeValue]}**\nNaš Discord Staff Team se vám bude věnovat hned jak to bude možné.`).setColor('#00FF00');
             const infoEmbed = new EmbedBuilder().setTitle('Informace').setColor('#5865F2');
             questionsMap[typeValue].forEach((obj, index) => {
                 infoEmbed.addFields({ name: obj.q, value: `\`\`\`${interaction.fields.getTextInputValue(`q${index}`)}\`\`\`` });
             });
-
-            const buttons = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket_request').setLabel('Uzavřít').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId('claim_ticket').setLabel('Převzít').setStyle(ButtonStyle.Success)
-            );
-
-            await ticketChannel.send({ content: `${interaction.user} | <@&${STAFF_PING_ROLE}>`, embeds: [welcomeEmbed, infoEmbed], components: [buttons] });
+            await ticketChannel.send({ content: `${interaction.user} | <@&${STAFF_PING_ROLE}>`, embeds: [welcomeEmbed, infoEmbed], components: [getTicketButtons(false, false, 'Převzít')] });
             await interaction.editReply(`Ticket vytvořen: ${ticketChannel}`);
         }
 
         if (interaction.isButton()) {
-            const updateMainButtons = async (disabledClose, disabledClaim, claimLabel) => {
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('close_ticket_request').setLabel('Uzavřít').setStyle(ButtonStyle.Danger).setDisabled(disabledClose),
-                    new ButtonBuilder().setCustomId('claim_ticket').setLabel(claimLabel).setStyle(claimLabel === 'Převzít' ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabledClaim)
-                );
-                await interaction.message.edit({ components: [row] });
-            };
-
-            const currentClaimLabel = interaction.message.components[0].components[1].label;
+            const currentLabel = interaction.message.components[0].components[1].label;
             const isClaimed = interaction.message.components[0].components[1].disabled;
 
             if (interaction.customId === 'claim_ticket') {
-                if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) return interaction.reply({ content: 'Tuto akci může provést pouze Staff!', ephemeral: true });
-                await updateMainButtons(false, true, 'Převzato');
+                if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) return interaction.reply({ content: 'Staff only!', ephemeral: true });
+                await interaction.message.edit({ components: [getTicketButtons(false, true, 'Převzato')] });
                 await interaction.reply({ content: `Ticket převzal/a **${interaction.user.username}**.` });
             }
 
             if (interaction.customId === 'close_ticket_request') {
-                await updateMainButtons(true, isClaimed, currentClaimLabel);
-
-                const confirmRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('confirm_close').setLabel('Ano, uzavřít').setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder().setCustomId('cancel_close').setLabel('Zrušit').setStyle(ButtonStyle.Secondary)
-                );
-                const reply = await interaction.reply({ content: '⚠️ Opravdu si přejete tento ticket uzavřít?', components: [confirmRow], fetchReply: true });
-
-                setTimeout(async () => {
-                    const msg = await interaction.channel.messages.fetch(reply.id).catch(() => null);
-                    if (msg) {
-                        await msg.delete().catch(() => {});
-                        await updateMainButtons(false, isClaimed, currentClaimLabel);
-                    }
-                }, 180000);
+                await initiateClose(interaction);
             }
 
             if (interaction.customId === 'confirm_close') {
                 await interaction.reply({ content: 'Ticket se archivuje...', ephemeral: true });
-                
-                const ticketOwnerId = interaction.channel.name.split('-')[1]; 
-                const member = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerId);
-
                 await interaction.channel.setParent(ARCHIVE_CATEGORY_ID, { lockPermissions: false });
-                
                 await interaction.channel.permissionOverwrites.set([
                     { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                     ...AUTHORIZED_ROLES.map(roleId => ({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }))
                 ]);
-
-                await interaction.channel.send(`✅ Ticket byl uzavřen a archivován uživatelem **${interaction.user.username}**.`);
+                await interaction.channel.send(`✅ Ticket byl archivován uživatelem **${interaction.user.username}**.`);
                 await interaction.message.delete().catch(() => {});
             }
 
             if (interaction.customId === 'cancel_close') {
-                await updateMainButtons(false, isClaimed, currentClaimLabel);
+                const messages = await interaction.channel.messages.fetch({ limit: 50 });
+                const mainMsg = messages.find(m => m.author.id === client.user.id && m.components.length > 0 && m.components[0].components[0].customId === 'close_ticket_request');
+                
+                if (mainMsg) await mainMsg.edit({ components: [getTicketButtons(false, isClaimed, currentLabel)] });
                 await interaction.message.delete().catch(() => {});
             }
         }
