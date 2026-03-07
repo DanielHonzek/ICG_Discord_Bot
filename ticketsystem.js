@@ -10,7 +10,7 @@ module.exports = (client, db) => {
     
     const AUTHORIZED_ROLES = [
         '1459070165164757225', '1466864975133016280', 
-        '1467512663306404087', '1459168937752137842'
+        '1467512663306404087', '1466335067029635163'
     ];
 
     const categoryNames = {
@@ -20,6 +20,27 @@ module.exports = (client, db) => {
         'unban_req': 'Žádost o zrušení trestu',
         'report_player': 'Nahlášení hráče/uživatele',
         'report_staff': 'Nahlášení člena A-Teamu'
+    };
+
+    const questionsMap = {
+        'gen_support': ['S čím vám můžeme pomoct?'],
+        'tech_support': ['O jaký technický problém se jedná?'],
+        'anticheat': ['Co byste rádi řešili ohledně AntiCheatu?'],
+        'unban_req': [
+            'Jaké je vaše herní username/Discord username?',
+            'Jaký trest jste dostal?',
+            'Jaký byl důvod obdržení trestu?',
+            'Kdy jste trest obdržel?',
+            'Proč bychom měli vaší žádosti vyhovět?'
+        ],
+        'report_player': [
+            'Jaké je username hráče/uživatele?',
+            'Proč tohoto hráče chcete nahlásit?'
+        ],
+        'report_staff': [
+            'Jaké je username člena A-Teamu?',
+            'Proč tohoto člena chcete nahlásit?'
+        ]
     };
 
     client.once('ready', async () => {
@@ -48,46 +69,20 @@ module.exports = (client, db) => {
 
     client.on('interactionCreate', async (interaction) => {
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
-            const modal = new ModalBuilder().setCustomId(`modal_${interaction.values[0]}`).setTitle(categoryNames[interaction.values[0]]);
+            const type = interaction.values[0];
+            const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(categoryNames[type]);
+            const questions = questionsMap[type];
 
-            const addInput = (id, label, style, length) => {
-                return new ActionRowBuilder().addComponents(
+            questions.forEach((q, i) => {
+                modal.addComponents(new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
-                        .setCustomId(id)
-                        .setLabel(label)
-                        .setPlaceholder(`Max. ${length} znaků`)
-                        .setStyle(style)
-                        .setMaxLength(length)
+                        .setCustomId(`q${i}`)
+                        .setLabel(q.substring(0, 45))
+                        .setStyle(q.length > 100 ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                        .setMaxLength(q.includes('username') || q.includes('trest') && !q.includes('důvod') ? 100 : 1000)
                         .setRequired(true)
-                );
-            };
-
-            if (interaction.values[0] === 'gen_support') {
-                modal.addComponents(addInput('q1', 'S čím vám můžeme pomoct?', TextInputStyle.Paragraph, 1000));
-            } else if (interaction.values[0] === 'tech_support') {
-                modal.addComponents(addInput('q1', 'O jaký technický problém se jedná?', TextInputStyle.Paragraph, 1000));
-            } else if (interaction.values[0] === 'anticheat') {
-                modal.addComponents(addInput('q1', 'Co byste rádi řešili ohledně AntiCheatu?', TextInputStyle.Paragraph, 1000));
-            } else if (interaction.values[0] === 'unban_req') {
-                modal.addComponents(
-                    addInput('q1', 'Vaše herní/Discord username', TextInputStyle.Short, 100),
-                    addInput('q2', 'Jaký trest jste dostal?', TextInputStyle.Short, 100),
-                    addInput('q3', 'Důvod obdržení trestu', TextInputStyle.Paragraph, 1000),
-                    addInput('q4', 'Kdy jste trest obdržel?', TextInputStyle.Short, 100),
-                    addInput('q5', 'Proč bychom měli vyhovět?', TextInputStyle.Paragraph, 1000)
-                );
-            } else if (interaction.values[0] === 'report_player') {
-                modal.addComponents(
-                    addInput('q1', 'Username hráče/uživatele', TextInputStyle.Short, 100),
-                    addInput('q2', 'Proč chcete hráče nahlásit?', TextInputStyle.Paragraph, 1000)
-                );
-            } else if (interaction.values[0] === 'report_staff') {
-                modal.addComponents(
-                    addInput('q1', 'Username člena A-Teamu', TextInputStyle.Short, 100),
-                    addInput('q2', 'Proč chcete člena nahlásit?', TextInputStyle.Paragraph, 1000)
-                );
-            }
-
+                ));
+            });
             await interaction.showModal(modal);
         }
 
@@ -95,6 +90,7 @@ module.exports = (client, db) => {
             await interaction.deferReply({ ephemeral: true });
             const typeValue = interaction.customId.replace('modal_', '');
             const typeLabel = categoryNames[typeValue];
+            const questions = questionsMap[typeValue];
             
             const ticketChannel = await interaction.guild.channels.create({
                 name: `ticket-${interaction.user.username}`,
@@ -107,14 +103,14 @@ module.exports = (client, db) => {
             });
 
             const welcomeEmbed = new EmbedBuilder()
-                .setTitle(`Úspěšně jste vytvořil ticket: ${typeLabel}`)
-                .setDescription(`Naš Discord Staff Team se vám bude věnovat hned jak to bude možné. Děkujeme za vaší trpělivost.`)
+                .setDescription(`Úspěšně jste vytvořil ticket: **${typeLabel}**\nNaš Discord Staff Team se vám bude věnovat hned jak to bude možné. Děkujeme za vaší trpělivost.`)
                 .setColor('#00FF00');
 
-            const infoEmbed = new EmbedBuilder().setTitle('Informace z formuláře').setColor('#5865F2');
+            const infoEmbed = new EmbedBuilder().setTitle('Informace').setColor('#5865F2');
             
-            interaction.fields.fields.forEach((field, index) => {
-                infoEmbed.addFields({ name: `Detail č. ${index + 1}`, value: `\`\`\`${field.value}\`\`\`` });
+            questions.forEach((question, index) => {
+                const answer = interaction.fields.getTextInputValue(`q${index}`);
+                infoEmbed.addFields({ name: question, value: `\`\`\`${answer}\`\`\`` });
             });
 
             const buttons = new ActionRowBuilder().addComponents(
@@ -128,7 +124,7 @@ module.exports = (client, db) => {
                 components: [buttons] 
             });
 
-            await interaction.editReply(`Ticket vytvořen v kanálu ${ticketChannel}`);
+            await interaction.editReply(`Ticket vytvořen: ${ticketChannel}`);
         }
 
         if (interaction.isButton()) {
@@ -136,7 +132,15 @@ module.exports = (client, db) => {
                 if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) {
                     return interaction.reply({ content: 'Tuto akci může provést pouze Staff!', ephemeral: true });
                 }
-                await interaction.reply({ content: `Ticket převzal/a **${interaction.user.username}**.` });
+
+                const oldRows = interaction.message.components[0];
+                const newRow = new ActionRowBuilder().addComponents(
+                    ButtonBuilder.from(oldRows.components[0]),
+                    ButtonBuilder.from(oldRows.components[1]).setDisabled(true).setLabel('Převzato').setStyle(ButtonStyle.Secondary)
+                );
+
+                await interaction.update({ components: [newRow] });
+                await interaction.followUp({ content: `Ticket převzal/a **${interaction.user.username}**.` });
             }
 
             if (interaction.customId === 'close_ticket_request') {
@@ -154,7 +158,7 @@ module.exports = (client, db) => {
             }
 
             if (interaction.customId === 'cancel_close') {
-                await interaction.message.delete();
+                await interaction.message.delete().catch(() => {});
             }
         }
     });
