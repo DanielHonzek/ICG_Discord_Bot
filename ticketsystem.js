@@ -20,10 +20,33 @@ module.exports = async (client, db) => {
         new SlashCommandBuilder().setName('prevzit').setDescription('Převezme ticket').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     ];
 
-    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-    try {
-        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    } catch (e) { console.error(e); }
+    client.once('ready', async () => {
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        try {
+            console.log('🔄 Registruji slash příkazy...');
+            await rest.put(
+                Routes.applicationCommands(client.user.id), 
+                { body: commands }
+            );
+            console.log('✅ Slash příkazy zaregistrovány!');
+        } catch (e) { 
+            console.error('❌ Chyba při registraci příkazů:', e); 
+        }
+
+        const channel = client.channels.cache.get(CHANNEL_ID);
+        if (!channel) return;
+        const msgs = await channel.messages.fetch({ limit: 10 });
+        if (!msgs.find(m => m.author.id === client.user.id && m.embeds.length > 0)) {
+            const embed = new EmbedBuilder().setTitle('Podpora serveru').setDescription('Vyberte si kategorii pro otevření ticketu.').setColor('#5865F2');
+            const row = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId('ticket_select')
+                    .setPlaceholder('Vyberte kategorii...')
+                    .addOptions(Object.entries(categoryNames).map(([v, l]) => ({ label: l, value: v })))
+            );
+            await channel.send({ embeds: [embed], components: [row] });
+        }
+    });
 
     const categoryNames = {
         'gen_support': 'Všeobecná podpora',
