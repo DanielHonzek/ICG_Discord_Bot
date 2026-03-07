@@ -5,7 +5,7 @@ const {
 } = require('discord.js');
 
 module.exports = (client, db) => {
-    const CHANNEL_ID = '1459073205380841482';
+    const CHANNEL_ID = '1459071877275193457';
     const STAFF_PING_ROLE = '1459169084787921019';
     
     const AUTHORIZED_ROLES = [
