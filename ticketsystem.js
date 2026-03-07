@@ -10,7 +10,7 @@ module.exports = (client, db) => {
     
     const AUTHORIZED_ROLES = [
         '1459070165164757225', '1466864975133016280', 
-        '1467512663306404087', '1466335067029635163'
+        '1467512663306404087', '1459070165164757225'
     ];
 
     const categoryNames = {
@@ -23,46 +23,34 @@ module.exports = (client, db) => {
     };
 
     const questionsMap = {
-        'gen_support': ['S čím vám můžeme pomoct?'],
-        'tech_support': ['O jaký technický problém se jedná?'],
-        'anticheat': ['Co byste rádi řešili ohledně AntiCheatu?'],
+        'gen_support': [{ q: 'S čím vám můžeme pomoct?', len: 1000 }],
+        'tech_support': [{ q: 'O jaký technický problém se jedná?', len: 1000 }],
+        'anticheat': [{ q: 'Co byste rádi řešili ohledně AntiCheatu?', len: 1000 }],
         'unban_req': [
-            'Jaké je vaše herní username/Discord username?',
-            'Jaký trest jste dostal?',
-            'Jaký byl důvod obdržení trestu?',
-            'Kdy jste trest obdržel?',
-            'Proč bychom měli vaší žádosti vyhovět?'
+            { q: 'Jaké je vaše herní username/Discord username?', len: 100 },
+            { q: 'Jaký trest jste dostal?', len: 100 },
+            { q: 'Jaký byl důvod obdržení trestu?', len: 1000 },
+            { q: 'Kdy jste trest obdržel?', len: 100 },
+            { q: 'Proč bychom měli vaší žádosti vyhovět?', len: 1000 }
         ],
         'report_player': [
-            'Jaké je username hráče/uživatele?',
-            'Proč tohoto hráče chcete nahlásit?'
+            { q: 'Jaké je username hráče/uživatele?', len: 100 },
+            { q: 'Proč tohoto hráče chcete nahlásit?', len: 1000 }
         ],
         'report_staff': [
-            'Jaké je username člena A-Teamu?',
-            'Proč tohoto člena chcete nahlásit?'
+            { q: 'Jaké je username člena A-Teamu?', len: 100 },
+            { q: 'Proč tohoto člena chcete nahlásit?', len: 1000 }
         ]
     };
 
     client.once('ready', async () => {
         const channel = client.channels.cache.get(CHANNEL_ID);
         if (!channel) return;
-
         const messages = await channel.messages.fetch({ limit: 10 });
         const botMessage = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
-
         if (!botMessage) {
-            const mainEmbed = new EmbedBuilder()
-                .setTitle('Podpora serveru')
-                .setDescription('Vyberte si kategorii z menu níže pro otevření ticketu.')
-                .setColor('#5865F2');
-
-            const selectMenu = new ActionRowBuilder().addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId('ticket_select')
-                    .setPlaceholder('Vyberte kategorii ticketu...')
-                    .addOptions(Object.entries(categoryNames).map(([value, label]) => ({ label, value })))
-            );
-
+            const mainEmbed = new EmbedBuilder().setTitle('Podpora serveru').setDescription('Vyberte si kategorii z menu níže pro otevření ticketu.').setColor('#5865F2');
+            const selectMenu = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('ticket_select').setPlaceholder('Vyberte kategorii ticketu...').addOptions(Object.entries(categoryNames).map(([value, label]) => ({ label, value }))));
             await channel.send({ embeds: [mainEmbed], components: [selectMenu] });
         }
     });
@@ -71,15 +59,14 @@ module.exports = (client, db) => {
         if (interaction.isStringSelectMenu() && interaction.customId === 'ticket_select') {
             const type = interaction.values[0];
             const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(categoryNames[type]);
-            const questions = questionsMap[type];
-
-            questions.forEach((q, i) => {
+            
+            questionsMap[type].forEach((obj, i) => {
                 modal.addComponents(new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId(`q${i}`)
-                        .setLabel(q.substring(0, 45))
-                        .setStyle(q.length > 100 ? TextInputStyle.Paragraph : TextInputStyle.Short)
-                        .setMaxLength(q.includes('username') || q.includes('trest') && !q.includes('důvod') ? 100 : 1000)
+                        .setLabel(obj.q.substring(0, 45))
+                        .setStyle(obj.len === 1000 ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                        .setMaxLength(obj.len)
                         .setRequired(true)
                 ));
             });
@@ -89,9 +76,6 @@ module.exports = (client, db) => {
         if (interaction.isModalSubmit()) {
             await interaction.deferReply({ ephemeral: true });
             const typeValue = interaction.customId.replace('modal_', '');
-            const typeLabel = categoryNames[typeValue];
-            const questions = questionsMap[typeValue];
-            
             const ticketChannel = await interaction.guild.channels.create({
                 name: `ticket-${interaction.user.username}`,
                 type: ChannelType.GuildText,
@@ -102,15 +86,10 @@ module.exports = (client, db) => {
                 ]
             });
 
-            const welcomeEmbed = new EmbedBuilder()
-                .setDescription(`Úspěšně jste vytvořil ticket: **${typeLabel}**\nNaš Discord Staff Team se vám bude věnovat hned jak to bude možné. Děkujeme za vaší trpělivost.`)
-                .setColor('#00FF00');
-
+            const welcomeEmbed = new EmbedBuilder().setDescription(`Úspěšně jste vytvořil ticket: **${categoryNames[typeValue]}**\nNaš Discord Staff Team se vám bude věnovat hned jak to bude možné. Děkujeme za vaší trpělivost.`).setColor('#00FF00');
             const infoEmbed = new EmbedBuilder().setTitle('Informace').setColor('#5865F2');
-            
-            questions.forEach((question, index) => {
-                const answer = interaction.fields.getTextInputValue(`q${index}`);
-                infoEmbed.addFields({ name: question, value: `\`\`\`${answer}\`\`\`` });
+            questionsMap[typeValue].forEach((obj, index) => {
+                infoEmbed.addFields({ name: obj.q, value: `\`\`\`${interaction.fields.getTextInputValue(`q${index}`)}\`\`\`` });
             });
 
             const buttons = new ActionRowBuilder().addComponents(
@@ -118,38 +97,44 @@ module.exports = (client, db) => {
                 new ButtonBuilder().setCustomId('claim_ticket').setLabel('Převzít').setStyle(ButtonStyle.Success)
             );
 
-            await ticketChannel.send({ 
-                content: `${interaction.user} | <@&${STAFF_PING_ROLE}>`, 
-                embeds: [welcomeEmbed, infoEmbed], 
-                components: [buttons] 
-            });
-
+            await ticketChannel.send({ content: `${interaction.user} | <@&${STAFF_PING_ROLE}>`, embeds: [welcomeEmbed, infoEmbed], components: [buttons] });
             await interaction.editReply(`Ticket vytvořen: ${ticketChannel}`);
         }
 
         if (interaction.isButton()) {
-            if (interaction.customId === 'claim_ticket') {
-                if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) {
-                    return interaction.reply({ content: 'Tuto akci může provést pouze Staff!', ephemeral: true });
-                }
-
-                const oldRows = interaction.message.components[0];
-                const newRow = new ActionRowBuilder().addComponents(
-                    ButtonBuilder.from(oldRows.components[0]),
-                    ButtonBuilder.from(oldRows.components[1]).setDisabled(true).setLabel('Převzato').setStyle(ButtonStyle.Secondary)
+            const updateMainButtons = async (disabledClose, disabledClaim, claimLabel = 'Převzít') => {
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('close_ticket_request').setLabel('Uzavřít').setStyle(ButtonStyle.Danger).setDisabled(disabledClose),
+                    new ButtonBuilder().setCustomId('claim_ticket').setLabel(claimLabel).setStyle(claimLabel === 'Převzít' ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabledClaim)
                 );
+                await interaction.message.edit({ components: [row] });
+            };
 
-                await interaction.update({ components: [newRow] });
-                await interaction.followUp({ content: `Ticket převzal/a **${interaction.user.username}**.` });
+            if (interaction.customId === 'claim_ticket') {
+                if (!AUTHORIZED_ROLES.some(id => interaction.member.roles.cache.has(id))) return interaction.reply({ content: 'Tuto akci může provést pouze Staff!', ephemeral: true });
+                await updateMainButtons(false, true, 'Převzato');
+                await interaction.reply({ content: `Ticket převzal/a **${interaction.user.username}**.` });
             }
 
             if (interaction.customId === 'close_ticket_request') {
+                const isClaimed = interaction.message.components[0].components[1].disabled;
+                await updateMainButtons(true, isClaimed, isClaimed ? 'Převzato' : 'Převzít');
+
                 const confirmRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('confirm_close').setLabel('Ano, uzavřít').setStyle(ButtonStyle.Danger),
                     new ButtonBuilder().setCustomId('cancel_close').setLabel('Zrušit').setStyle(ButtonStyle.Secondary)
                 );
                 const reply = await interaction.reply({ content: 'Opravdu si přejete tento ticket uzavřít?', components: [confirmRow], fetchReply: true });
-                setTimeout(() => reply.delete().catch(() => {}), 60000);
+
+                setTimeout(async () => {
+                    try {
+                        const msg = await interaction.channel.messages.fetch(reply.id).catch(() => null);
+                        if (msg) {
+                            await msg.delete().catch(() => {});
+                            await updateMainButtons(false, isClaimed, isClaimed ? 'Převzato' : 'Převzít');
+                        }
+                    } catch (e) {}
+                }, 180000);
             }
 
             if (interaction.customId === 'confirm_close') {
@@ -158,6 +143,8 @@ module.exports = (client, db) => {
             }
 
             if (interaction.customId === 'cancel_close') {
+                const isClaimed = interaction.message.components[0].components[1].disabled;
+                await updateMainButtons(false, isClaimed, isClaimed ? 'Převzato' : 'Převzít');
                 await interaction.message.delete().catch(() => {});
             }
         }
